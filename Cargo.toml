@@ -1,0 +1,18 @@
+[package]
+name = "matrix-chatgpt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+async-openai = "0.9"
+matrix-sdk = { version = "0.6", default-features = false, features = [
+  "anyhow",
+  "e2e-encryption",
+  "markdown",
+  "rustls-tls",
+  "sled",
+] }
+tokio = { version = "1.0", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
