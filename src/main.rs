@@ -6,11 +6,14 @@ use async_openai::{
 use lazy_static::lazy_static;
 use matrix_sdk::{
     config::SyncSettings,
-    room::Room,
+    room::{MessagesOptions, Room},
     ruma::{
-        events::room::{
-            member::StrippedRoomMemberEvent,
-            message::{MessageType, RoomMessageEventContent, SyncRoomMessageEvent},
+        events::{
+            room::{
+                member::StrippedRoomMemberEvent,
+                message::{MessageType, RoomMessageEventContent, SyncRoomMessageEvent},
+            },
+            AnyMessageLikeEvent, AnyTimelineEvent, MessageLikeEvent, OriginalSyncMessageLikeEvent,
         },
         UserId,
     },
@@ -98,8 +101,7 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
     let Some(event) = event.as_original() else { return };
 
     // We only want to process text messages from rooms the bot joined.
-    let Room::Joined(joined_room) = room else { return };
-    let MessageType::Text(ref text_content) = event.content.msgtype else { return };
+    let Room::Joined(ref joined_room) = room else { return };
 
     joined_room
         .read_receipt(&event.event_id)
@@ -109,10 +111,6 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
         })
         .ok();
 
-    debug!("Received message: {}", text_content.body);
-
-    // let timeline = room.timeline().await;
-
     joined_room
         .typing_notice(true)
         .await
@@ -121,23 +119,8 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
         })
         .ok();
 
-    let chatgpt_request = CreateChatCompletionRequest {
-        model: "gpt-3.5-turbo".into(),
-        messages: vec![ChatCompletionRequestMessage {
-            role: Role::User,
-            content: text_content.body.to_string(),
-            name: Some(event.sender.to_string()),
-        }],
-        temperature: None,
-        top_p: None,
-        n: Some(1),
-        stream: Some(false),
-        stop: None,
-        max_tokens: None,
-        presence_penalty: None,
-        frequency_penalty: None,
-        logit_bias: None,
-        user: Some("matrix-chatgpt".into()),
+    let Ok(chatgpt_request) = room_event_to_chatgpt_request(event, &room, &client).await else {
+        return;
     };
     let Ok(chatgpt_response) = Chat::new(&OPENAI_CLIENT).create(chatgpt_request).await else { return; };
 
@@ -191,6 +174,55 @@ async fn on_stripped_state_member(
                 break;
             }
         }
+
         info!("Successfully joined room {}", room.room_id());
     });
+}
+
+async fn room_event_to_chatgpt_request(
+    _event: &OriginalSyncMessageLikeEvent<RoomMessageEventContent>,
+    room: &Room,
+    client: &MatrixClient,
+) -> Result<CreateChatCompletionRequest> {
+    let mut incoming_messages = room.messages(MessagesOptions::backward()).await?.chunk;
+    incoming_messages.reverse();
+
+    let mut messages = vec![];
+
+    for event in incoming_messages {
+        if let AnyTimelineEvent::MessageLike(event) = event.event.deserialize()? {
+            if let AnyMessageLikeEvent::RoomMessage(event) = event {
+                if let MessageLikeEvent::Original(event) = event {
+                    if let MessageType::Text(ref text_content) = event.content.msgtype {
+                        messages.push(ChatCompletionRequestMessage {
+                            role: match client.user_id() {
+                                Some(user_id) if user_id == event.sender => Role::Assistant,
+                                _ => Role::User,
+                            },
+                            content: text_content.body.to_string(),
+                            name: None,
+                            // name: Some(event.sender.to_string()), // TODO: figure out why setting the name breaks the request
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    debug!("Creating ChatGPT request for messages: {:?}", messages);
+
+    Ok(CreateChatCompletionRequest {
+        model: "gpt-3.5-turbo".into(),
+        messages,
+        temperature: None,
+        top_p: None,
+        n: Some(1),
+        stream: Some(false),
+        stop: None,
+        max_tokens: None,
+        presence_penalty: None,
+        frequency_penalty: None,
+        logit_bias: None,
+        user: Some("matrix-chatgpt".into()),
+    })
 }
