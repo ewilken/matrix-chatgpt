@@ -23,7 +23,17 @@ lazy_static! {
     static ref OPENAI_CLIENT: OpenAIClient = {
         let openai_api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
         let openai_client = OpenAIClient::new().with_api_key(openai_api_key);
+
         openai_client
+    };
+    static ref AUTHORIZED_USERS: Vec<String> = {
+        let Ok(authorized_users_string) = env::var("AUTHORIZED_USERS") else { return vec![]; };
+        let authorized_users = authorized_users_string
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
+
+        authorized_users
     };
 }
 
@@ -44,7 +54,7 @@ async fn main() -> Result<()> {
 
     matrix_client
         .login_username(&matrix_user_id, &matrix_password)
-        .initial_device_display_name("ChatGPT")
+        .initial_device_display_name("matrix-chatgpt")
         .send()
         .await?;
 
@@ -71,17 +81,27 @@ async fn main() -> Result<()> {
 async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: MatrixClient) {
     debug!("Received event {:?} in room {:?}", event, room);
 
-    if event.sender() == client.user_id().unwrap() {
-        // Skip messages sent by the bot.
-        return;
+    if let Some(user_id) = client.user_id() {
+        // Skip messages sent by the bot itself.
+        if event.sender() == user_id {
+            return;
+        }
+
+        // If we have an authorized users list, ignore messages from unauthorized users.
+        if AUTHORIZED_USERS.len() > 0 && !AUTHORIZED_USERS.contains(&user_id.to_string()) {
+            debug!("Ignoring message from unauthorized user {}", user_id);
+            return;
+        }
     }
 
     let Some(event) = event.as_original() else { return };
-    // We only want to log text messages in joined rooms.
-    let Room::Joined(room) = room else { return };
+
+    // We only want to process text messages from rooms the bot joined.
+    let Room::Joined(joined_room) = room else { return };
     let MessageType::Text(ref text_content) = event.content.msgtype else { return };
 
-    room.read_receipt(&event.event_id)
+    joined_room
+        .read_receipt(&event.event_id)
         .await
         .map_err(|e| {
             error!("Failed to send read receipt: {:?}", e);
@@ -90,7 +110,10 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
 
     debug!("Received message: {}", text_content.body);
 
-    room.typing_notice(true)
+    // let timeline = room.timeline().await;
+
+    joined_room
+        .typing_notice(true)
         .await
         .map_err(|e| {
             error!("Failed to send typing notice: {:?}", e);
@@ -102,7 +125,7 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
         messages: vec![ChatCompletionRequestMessage {
             role: Role::User,
             content: text_content.body.to_string(),
-            name: None, // TODO: get user name
+            name: Some(event.sender.to_string()),
         }],
         temperature: None,
         top_p: None,
@@ -121,7 +144,8 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
 
     debug!("Sending ChatGPT response: {}", response);
 
-    room.send(RoomMessageEventContent::text_markdown(response), None)
+    joined_room
+        .send(RoomMessageEventContent::text_markdown(response), None)
         .await
         .map_err(|e| {
             error!("Failed to send answer: {:?}", e);
@@ -135,33 +159,34 @@ async fn on_stripped_state_member(
     room: Room,
 ) {
     if room_member.state_key != client.user_id().unwrap() {
-        // the invite we've seen isn't for us, but for someone else. ignore
+        // The invite we've seen isn't for us, but for someone else. Ignore.
         return;
     }
+    let Room::Invited(room) = room else {
+        return;
+    };
 
-    if let Room::Invited(room) = room {
-        tokio::spawn(async move {
-            info!("Autojoining room {}", room.room_id());
-            let mut delay = 2;
+    tokio::spawn(async move {
+        info!("Autojoining room {}", room.room_id());
+        let mut delay = 2;
 
-            while let Err(err) = room.accept_invitation().await {
-                // retry autojoin due to synapse sending invites, before the
-                // invited user can join for more information see
-                // https://github.com/matrix-org/synapse/issues/4345
-                error!(
-                    "Failed to join room {} ({err:?}), retrying in {delay}s",
-                    room.room_id()
-                );
+        while let Err(err) = room.accept_invitation().await {
+            // Retry autojoin due to synapse sending invites before the
+            // invited user can join. For more information see
+            // https://github.com/matrix-org/synapse/issues/4345
+            error!(
+                "Failed to join room {} ({err:?}), retrying in {delay}s",
+                room.room_id()
+            );
 
-                tokio::time::sleep(Duration::from_secs(delay)).await;
-                delay *= 2;
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+            delay *= 2;
 
-                if delay > 3600 {
-                    error!("Can't join room {} ({err:?})", room.room_id());
-                    break;
-                }
+            if delay > 3600 {
+                error!("Can't join room {} ({err:?})", room.room_id());
+                break;
             }
-            info!("Successfully joined room {}", room.room_id());
-        });
-    }
+        }
+        info!("Successfully joined room {}", room.room_id());
+    });
 }
