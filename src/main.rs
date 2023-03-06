@@ -81,7 +81,21 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
     let Room::Joined(room) = room else { return };
     let MessageType::Text(ref text_content) = event.content.msgtype else { return };
 
+    room.read_receipt(&event.event_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to send read receipt: {:?}", e);
+        })
+        .ok();
+
     debug!("Received message: {}", text_content.body);
+
+    room.typing_notice(true)
+        .await
+        .map_err(|e| {
+            error!("Failed to send typing notice: {:?}", e);
+        })
+        .ok();
 
     let chatgpt_request = CreateChatCompletionRequest {
         model: "gpt-3.5-turbo".into(),
@@ -107,12 +121,10 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
 
     debug!("Sending ChatGPT response: {}", response);
 
-    let response_content = RoomMessageEventContent::text_markdown(response);
-
-    room.send(response_content, None)
+    room.send(RoomMessageEventContent::text_markdown(response), None)
         .await
         .map_err(|e| {
-            error!("Failed to send message: {:?}", e);
+            error!("Failed to send answer: {:?}", e);
         })
         .ok();
 }
