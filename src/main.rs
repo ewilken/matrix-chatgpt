@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Handling incoming messages in joined rooms.
 async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: MatrixClient) {
     debug!("Received event {:?} in room {:?}", event, room);
 
@@ -153,14 +154,17 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
         .ok();
 }
 
+/// Joining rooms on invite.
 async fn on_stripped_state_member(
     room_member: StrippedRoomMemberEvent,
     client: MatrixClient,
     room: Room,
 ) {
-    if room_member.state_key != client.user_id().unwrap() {
+    if let Some(user_id) = client.user_id() {
         // The invite we've seen isn't for us, but for someone else. Ignore.
-        return;
+        if room_member.state_key != user_id {
+            return;
+        }
     }
     let Room::Invited(room) = room else {
         return;
