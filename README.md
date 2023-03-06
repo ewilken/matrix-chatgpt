@@ -8,16 +8,16 @@ This is a quick and dirty, probably flawed implementation of a Matrix bot that u
 
 The bot can be configured via the following environment variables:
 
-| Variable           | Mandatory | Description                                                                                                                                                                                                             |
-| ------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPENAI_API_KEY`   | true      | OpenAI API key.                                                                                                                                                                                                         |
-| `MATRIX_USERNAME`  | true      | Matrix username of the bot.                                                                                                                                                                                             |
-| `MATRIX_PASSWORD`  | yes       | Matrix password of the bot.                                                                                                                                                                                             |
-| `AUTHORIZED_USERS` | false     | Comma-separated list of Matrix users that are allowed to use the bot. If set, the bot will only answer to messages sent accounts on the list. If not set, the bot will answer any message on any room it gets added to. |
+| Variable           | Mandatory | Description                                                                                                                                                                                                                          |
+| ------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OPENAI_API_KEY`   | true      | OpenAI API key.                                                                                                                                                                                                                      |
+| `MATRIX_USERNAME`  | true      | Matrix username of the bot's account.                                                                                                                                                                                                |
+| `MATRIX_PASSWORD`  | true      | Matrix password of the bot's account.                                                                                                                                                                                                |
+| `AUTHORIZED_USERS` | false     | Comma-separated list of Matrix users that are allowed to use the bot. If set, the bot will only generate answers to messages sent by accounts on the list. If not set, the bot will answer any message on any room it gets added to. |
 
 ## Shortcomings
 
-- Due to lack of implementation effort, at the moment the bot is stateless. Matrix client sessions are not persisted nor recovered upon service restart. Meaning that after a service restart, the ChatGPT conversion of every room the bot is in will start over, as messages from sessions previous to its restart can't be decrypted by the bot.
+- Due to lack of implementation effort, at the moment the bot is stateless. Matrix client sessions are not persisted nor recovered upon service restart. Meaning that after a service restart, the ChatGPT conversion of every room the bot is in will start over, as messages from sessions previous to its restart can't be decrypted by the bot. In reality, this shouldn't hurt too much, as ChatGPT conversations seem to be of rather short, ephemeral nature.
 
 ## Usage
 
