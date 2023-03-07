@@ -92,7 +92,7 @@ async fn on_room_message(event: SyncRoomMessageEvent, room: Room, client: Matrix
         }
 
         // If we have an authorized users list, ignore messages from unauthorized users.
-        if AUTHORIZED_USERS.len() > 0 && !AUTHORIZED_USERS.contains(&user_id.to_string()) {
+        if AUTHORIZED_USERS.len() > 0 && !AUTHORIZED_USERS.contains(&event.sender().to_string()) {
             debug!("Ignoring message from unauthorized user {}", user_id);
             return;
         }
