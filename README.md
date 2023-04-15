@@ -1,3 +1,5 @@
+**Deprecation Notice:** This was a fun PoC trying out the `matrix-sdk` and `async-openai`, but there's [far better projects](https://github.com/matrixgpt/matrix-chatgpt-bot) out there taking the implementation far more seriously. I'd recommend using one of them instead.
+
 # Matrix-ChatGPT
 
 Matrix bridge to the ChatGPT API.
